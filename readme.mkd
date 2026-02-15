@@ -1,0 +1,278 @@
+# 🥋 WKF Regulations RAG Chatbot (Local LLM + FAISS)
+A fully local Retrieval-Augmented Generation (RAG) chatbot designed to answer questions about WKF Karate regulations using a PDF rulebook as the knowledge base.
+
+This project uses:
+- PDF text extraction with PyMuPDF
+- Chunking with overlap for semantic retrieval
+- Embeddings via BAAI/bge-small-en
+- Vector similarity search using FAISS
+- A locally hosted Mistral 7B model served with Ollama
+- Multiple security guardrails to reduce hallucinations
+
+The system runs entirely locally — no external API calls required.
+
+## 📌 Architecture Overview
+This chatbot follows a classic RAG pipeline:
+```
+PDF → Text Extraction → Chunking → Embeddings → FAISS Index
+                                             ↓
+User Question → Embedding → Similarity Search → Context → Local LLM → Validated Answer
+```
+
+## 📂 Project Structure
+```
+data/pdf     # PDF documents downloaded from https://www.wkf.net/documents
+data/txt     # Raw text files extracted from PDF documents
+data/chunk   # Chunks from TXT files
+extract.py   # Extract raw text from PDF
+chunk.py     # Split text into overlapping chunks
+embed.py     # Create embeddings + FAISS index
+ask.py       # Retrieve relevant chunks + query local LLM
+```
+
+## 🔄 Workflow
+### 1️⃣ Extract Text from PDF
+Script: `extract.py`
+
+Uses PyMuPDF to extract all text from a PDF rulebook into a raw .txt file.
+
+```
+python extract.py data/pdf/WKF_2026_Kumite_Competition_Rules.pdf data/txt/kumite_rules.txt
+```
+
+
+Output:
+- kumite_rules.txt
+
+⚠️ You should manually or programmatically clean:
+- Headers / footers
+- Page numbers
+- Broken formatting
+- Unwanted spacing
+
+### 2️⃣ Chunk the Text
+Script: `chunk.py`
+
+Splits cleaned text into overlapping chunks.
+
+Why overlap?
+- Prevents semantic breaks between chunks
+- Improves retrieval quality
+
+```
+python chunk.py data/txt/kumite_rules.txt data/chunk
+```
+
+Config:
+- Chunk size: 300 tokens
+- Overlap: 50 tokens
+
+Output:
+- chunk_000.txt
+- chunk_001.txt
+- ...
+
+### 3️⃣ Generate Embeddings + Build Vector Index
+Script: `embed.py`
+
+- Loads chunk files
+- Generates embeddings using BAAI/bge-small-en
+- Normalizes embeddings
+- Builds a cosine-similarity FAISS index
+- Saves index + metadata
+
+```
+python embed.py
+```
+
+Output:
+- index.faiss
+- metadata.pkl
+
+Why normalization?
+
+Because FAISS uses Inner Product, and with normalized vectors:
+```
+Inner Product = Cosine Similarity
+```
+
+### 4️⃣ Ask Questions
+Script: `ask.py`
+
+Full RAG pipeline:
+- Encode user query
+- Perform similarity search in FAISS
+- Filter results using threshold
+- Build constrained prompt
+- Send to local Mistral 7B
+- Validate answer
+
+```python
+python ask.py
+```
+
+## 🧠 Models Used
+### Embedding Model
+- `BAAI/bge-small-en`
+- Lightweight
+- Good semantic quality
+- Fast for local execution
+
+### LLM
+- `mistral:7b`
+- Served locally via Ollama REST API
+- Runs on local network (http://ollama.server:11434)
+
+```bash
+# Install ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Configure to listen on all network interface
+vi /etc/systemd/system/ollama.service
+# Replace: ExecStart=/usr/local/bin/ollama serve
+# By: ExecStart=OLLAMA_HOST=0.0.0.0 /usr/local/bin/ollama serve
+
+# Reload daemon and restart ollama service
+systemctl daemon-reload
+systemctl restart ollama
+
+# Control the server is running, expected result: "Ollama is running"
+curl http://localhost:11434
+
+# Pull mistral model
+ollama pull mistral:7b
+
+# Check model is loaded
+ollama list
+```
+
+## 🔐 Security & Hallucination Guardrails
+This project includes multiple safety layers to reduce hallucinations and enforce domain constraints.
+
+### 1️⃣ Similarity Threshold Filter
+In `search()`:
+
+```python
+threshold = 0.76
+```
+
+If no chunk exceeds this cosine similarity:
+```
+Return None → Reject question
+```
+
+This prevents answering:
+- Out-of-domain questions
+- Random unrelated prompts
+
+### 2️⃣ Context-Only Prompt Engineering
+
+The LLM is explicitly instructed:
+```
+Answer ONLY using the provided context.
+If not found, say:
+"This question is outside WKF regulations."
+Do NOT guess.
+Do NOT use outside knowledge.
+```
+
+This strongly reduces hallucinations.
+
+### 3️⃣ Context Size Limiter
+```python
+MAX_CONTEXT_CHARS = 8000
+```
+
+Prevents:
+- Prompt truncation
+- Model ignoring earlier chunks
+- Overflow errors
+
+### 4️⃣ Post-Generation Validation Layer
+Function:
+```python
+validate_response()
+```
+
+Mechanism:
+- Computes word overlap ratio between answer and retrieved context
+- If overlap < 35% → reject answer
+
+This blocks:
+- Hallucinated completions
+- Fabricated details
+- Creative responses outside context
+
+### 5️⃣ Local-Only Architecture
+No OpenAI, no cloud APIs.
+
+Everything runs locally:
+- FAISS index
+- Embedding model
+- Mistral 7B via Ollama
+- REST API on private network
+
+This ensures:
+- Data privacy
+- No external data leakage
+- Full control of the system
+
+## ✨ Features
+- ✅ Fully local RAG pipeline
+- ✅ Fast semantic search (FAISS)
+- ✅ Cosine similarity with normalized embeddings
+- ✅ Overlapping chunk strategy
+- ✅ Multi-layer hallucination defense
+- ✅ Domain-restricted answering
+- ✅ Simple CLI interface
+- ✅ Modular pipeline (easy to improve/replace components)
+
+## 🧩 Design Decisions
+### Why small embedding model?
+- Faster indexing
+- Lower RAM usage
+- Good enough for rule-based documents
+### Why FAISS IndexFlatIP?
+- Exact search (no approximation)
+- Reliable cosine similarity
+- Simple and robust
+### Why validation layer?
+Even strong prompt engineering does not fully prevent hallucinations.
+The overlap check acts as a final deterministic safety gate.
+
+## 🚀 Possible Improvements
+- Add hybrid search (BM25 + vector)
+- Add re-ranking model
+- Add conversation memory
+- Replace overlap validator with semantic verifier
+- Add FastAPI backend
+- Add web UI
+- Add multi-document ingestion pipeline
+- Use metadata filtering
+- Quantize Mistral for lower hardware usage
+
+## 📊 End-to-End Flow Summary
+| Step    | Script     | Output                 |
+| ------- | ---------- | ---------------------- |
+| Extract | extract.py | Raw text               |
+| Chunk   | chunk.py   | Overlapping chunks     |
+| Embed   | embed.py   | FAISS index + metadata |
+| Ask     | ask.py     | Validated answer       |
+
+## 🎯 What This Project Demonstrates
+- Understanding of RAG architecture
+- Vector similarity search
+- Embedding normalization principles
+- Prompt constraint engineering
+- Defensive AI system design
+- Local LLM deployment
+- Multi-layer hallucination mitigation
+
+## 🏁 Final Notes
+This is a strong learning project that demonstrates:
+- Real-world RAG pipeline implementation
+- Local LLM orchestration
+- Practical AI safety techniques
+- Structured modular architecture
+
+It is production-minded, privacy-preserving, and extensible.
