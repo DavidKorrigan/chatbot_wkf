@@ -28,6 +28,11 @@ extract.py   # Extract raw text from PDF
 chunk.py     # Split text into overlapping chunks
 embed.py     # Create embeddings + FAISS index
 ask.py       # Retrieve relevant chunks + query local LLM
+
+Dependencies installation:
+python3 -m venv venv
+source venv/bin/activate
+pip install pymupdf sentence-transformers faiss-cpu requests
 ```
 
 ## 🔄 Workflow
