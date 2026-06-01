@@ -145,8 +145,6 @@ if __name__ == "__main__":
         # Step 3: Send to LLM
         answer = ask_mistral(context, question)
 
-        answer = ask_mistral(context, question)
-
         if not validate_response(answer, context):
             print("⚠️ The generated answer was rejected (possible hallucination).")
         else:
